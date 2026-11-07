@@ -11,3 +11,6 @@ test-logging/
 *.user
 *.suo
 icon-*.png
+
+observer/
+test-observer/
