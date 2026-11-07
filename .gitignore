@@ -1,0 +1,13 @@
+# Build outputs and local diagnostics
+bin/
+obj/
+app/
+*-build/
+build-home/
+icon-backup/
+before-*/
+test-local/
+test-logging/
+*.user
+*.suo
+icon-*.png
