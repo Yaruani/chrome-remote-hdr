@@ -37,15 +37,23 @@ sealed class RemoteAppTheme
         }
     }
 
+    public int? CurrentMode => readMode();
+
+    public void SetManualMode(int mode)
+    {
+        if (readMode() == mode)
+            return;
+
+        writeMode(mode);
+        Diagnostics.Log($"Windowsのアプリモードを手動で{(mode == 1 ? "ライト" : "ダーク")}に変更");
+    }
+
     public void Apply()
     {
         if (!Enabled || File.Exists(restorePath))
             return;
 
         var previous = readMode();
-        if (previous == 1)
-            return;
-
         // Save the original mode before changing the shared Windows setting.
         var stagingPath = restorePath + ".tmp";
         using (var file = File.Create(stagingPath))
@@ -55,8 +63,11 @@ sealed class RemoteAppTheme
         }
 
         File.Move(stagingPath, restorePath);
-        writeMode(1);
-        Diagnostics.Log("Windowsのアプリモードをライトに変更");
+        if (previous != 1)
+        {
+            writeMode(1);
+            Diagnostics.Log("Windowsのアプリモードをライトに変更");
+        }
     }
 
     public void Restore()
@@ -65,10 +76,10 @@ sealed class RemoteAppTheme
             return;
 
         var previous = JsonSerializer.Deserialize<int?>(File.ReadAllText(restorePath));
-        if (previous is not (null or 0))
+        if (previous is not (null or 0 or 1))
             throw new InvalidDataException("元のアプリモードの記録が無効です。");
 
-        if (readMode() == 1)
+        if (readMode() != previous)
         {
             writeMode(previous);
             Diagnostics.Log("Windowsのアプリモードを復元");
