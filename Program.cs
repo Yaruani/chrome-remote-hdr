@@ -34,27 +34,89 @@ static class Display {
  public static void Set(MonitorState s, bool enabled) { var state=new SetState {Header=new Header {Type=16,Size=(uint)Marshal.SizeOf<SetState>(),Adapter=new Luid {Low=s.Low,High=s.High},Id=s.Id},Value=enabled?1u:0u}; var rc=SetInfo(ref state); if(rc!=0) throw new Exception($"HDRの切り替えに失敗しました (ディスプレイ {s.Id}, エラー {rc})。"); }
 }
 sealed class Tray : ApplicationContext {
- readonly NotifyIcon icon; readonly ToolStripMenuItem status, startup, logging; EventLogWatcher? watcher; readonly object gate=new(); bool connected; readonly string statePath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ChromeRemoteHDR","restore.json");
+ readonly NotifyIcon icon; readonly ToolStripMenuItem status, startup, logging, themeToggle;
+ readonly RemoteAppTheme remoteTheme = new();
+ bool themeConnected;
+ bool quitting;
+ EventLogWatcher? watcher; readonly object gate=new(); bool connected; readonly string statePath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ChromeRemoteHDR","restore.json");
  const string RunKey=@"Software\Microsoft\Windows\CurrentVersion\Run";
  public Tray(string? warning) {
   status=new("状態: 監視開始中") {Enabled=false}; startup=new("Windowsログイン時に起動") {CheckOnClick=false}; startup.Click+=(_,_)=>ToggleStartup();
   logging=new("動作ログを保存") {Checked=Diagnostics.Enabled}; logging.Click+=(_,_)=>ToggleLogging();
-  var menu=new ContextMenuStrip(); menu.Items.Add(status); menu.Items.Add(startup); menu.Items.Add(logging); menu.Items.Add("ログ保存先を開く",null,(_,_)=>{ try {Diagnostics.OpenFolder();} catch(Exception e){Notify(e.Message);} }); menu.Items.Add("保存されたHDR設定を復元",null,(_,_)=>{ lock(gate) Restore(); }); menu.Items.Add("終了",null,(_,_)=>Quit());
+  themeToggle = new("接続中はWindowsのアプリをライトにする") { Checked = remoteTheme.Enabled };
+  themeToggle.Click += (_, _) => ToggleRemoteTheme();
+  var menu=new ContextMenuStrip(); menu.Items.Add(status); menu.Items.Add(startup); menu.Items.Add(logging); menu.Items.Add(themeToggle); menu.Items.Add("ログ保存先を開く",null,(_,_)=>{ try {Diagnostics.OpenFolder();} catch(Exception e){Notify(e.Message);} }); menu.Items.Add("保存されたHDR設定を復元",null,(_,_)=>{ lock(gate) Restore(); }); menu.Items.Add("終了",null,(_,_)=>Quit());
   icon=new NotifyIcon {Text="Chrome Remote HDR",Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application,ContextMenuStrip=menu,Visible=true}; UpdateStartup();
+  TryThemeChange(remoteTheme.Restore);
   try { var query=new EventLogQuery("Application",PathType.LogName,"*[System[Provider[@Name='chromoting'] and (EventID=1 or EventID=2)]]"); watcher=new EventLogWatcher(query); watcher.EventRecordWritten+=OnEvent; watcher.Enabled=true; SetStatus(File.Exists(statePath)?"監視中・復元待ちの設定あり":"監視中"); }
   catch(Exception e) { Diagnostics.Log("イベント監視エラー: "+e); SetStatus("監視エラー"); Notify("イベントログの監視を開始できません: "+e.Message); }
   if(warning!=null) Notify(warning); else if(!Diagnostics.StorageAvailable) Notify("ログを保存できません。保存先を確認してください。");
  }
- void OnEvent(object? sender,EventRecordWrittenEventArgs e) { try { if(e.EventException!=null) throw e.EventException; using var record=e.EventRecord; if(record==null)return; Diagnostics.Log("接続イベント ID="+record.Id); lock(gate) { if(record.Id==1) Connect(); else if(record.Id==2) Restore(); } } catch(Exception ex) { Diagnostics.Log("接続処理エラー: "+ex); SetStatus("エラー"); Notify(ex.Message); } }
+ void OnEvent(object? sender, EventRecordWrittenEventArgs e)
+ {
+  try
+  {
+   if (e.EventException != null)
+    throw e.EventException;
+   using var record = e.EventRecord;
+   if (record == null)
+    return;
+
+   lock (gate)
+   {
+    if (quitting)
+     return;
+
+    Diagnostics.Log("接続イベント ID=" + record.Id);
+    if (record.Id == 1)
+    {
+     themeConnected = true;
+     try { Connect(); }
+     finally { TryThemeChange(remoteTheme.Apply); }
+    }
+    else if (record.Id == 2)
+    {
+     themeConnected = false;
+     try { Restore(); }
+     finally { TryThemeChange(remoteTheme.Restore); }
+    }
+   }
+  }
+  catch (Exception ex)
+  {
+   Diagnostics.Log("接続処理エラー: " + ex);
+   SetStatus("エラー");
+   Notify(ex.Message);
+  }
+ }
  void Connect() { Diagnostics.Log("HDRオフ処理開始"); if(connected || File.Exists(statePath)) { connected=true; SetStatus("接続中・復元待ち"); return; } var items=Display.Get().Where(x=>x.Enabled).ToList(); Directory.CreateDirectory(Path.GetDirectoryName(statePath)!); File.WriteAllText(statePath,JsonSerializer.Serialize(items)); connected=true; foreach(var item in items) Display.Set(item,false); SetStatus($"接続中・HDRオフ {items.Count}台"); Diagnostics.Log($"HDRオフ完了: {items.Count}台"); }
  void Restore() { Diagnostics.Log("HDR復元処理開始"); if(!File.Exists(statePath)) { connected=false; SetStatus("監視中"); return; } try { var saved=JsonSerializer.Deserialize<List<MonitorState>>(File.ReadAllText(statePath)) ?? throw new Exception("保存した設定を読み取れません。"); var active=Display.Get(); var missing=new List<MonitorState>(); foreach(var item in saved) { if(!active.Any(x=>x.Low==item.Low && x.High==item.High && x.Id==item.Id)) {missing.Add(item); continue;} try { Display.Set(item,true); } catch { missing.Add(item); } } connected=false; if(missing.Count>0) { File.WriteAllText(statePath,JsonSerializer.Serialize(missing)); SetStatus("復元未完了"); Diagnostics.Log($"HDR復元未完了: {missing.Count}台"); Notify($"{missing.Count}台のHDRを復元できません。ディスプレイ接続を確認し、メニューから再試行してください。"); } else {File.Delete(statePath); SetStatus("監視中"); Diagnostics.Log("HDR復元完了");} } catch(Exception e) { Diagnostics.Log("HDR復元エラー: "+e); SetStatus("復元エラー"); Notify(e.Message); } }
+ void ToggleRemoteTheme()
+ {
+  lock (gate)
+  {
+   TryThemeChange(() =>
+   {
+    remoteTheme.SetEnabled(!remoteTheme.Enabled);
+    if (themeConnected)
+     remoteTheme.Apply();
+   });
+   themeToggle.Checked = remoteTheme.Enabled;
+  }
+ }
+ void TryThemeChange(Action change)
+ {
+  try { change(); }
+  catch (Exception e)
+  {
+   Diagnostics.Log("アプリモード切り替えエラー: " + e);
+   Notify("Windowsのアプリモードを切り替えられません: " + e.Message);
+  }
+ }
  void ToggleLogging() { try { if(Diagnostics.Enabled) Diagnostics.Log("ログをオフにしました。"); Diagnostics.SetEnabled(!Diagnostics.Enabled); logging.Checked=Diagnostics.Enabled; } catch(Exception e) { Notify("ログ設定を保存できません: "+e.Message); } }
  void ToggleStartup() { try { using var key=Registry.CurrentUser.CreateSubKey(RunKey); if(key.GetValue("ChromeRemoteHDR")!=null) key.DeleteValue("ChromeRemoteHDR"); else key.SetValue("ChromeRemoteHDR", "\""+Application.ExecutablePath+"\""); UpdateStartup(); } catch(Exception e) { Notify(e.Message); } }
  void UpdateStartup() { using var key=Registry.CurrentUser.OpenSubKey(RunKey); startup.Checked=key?.GetValue("ChromeRemoteHDR")!=null; }
  void SetStatus(string s) { if(status.Owner?.InvokeRequired==true) { status.Owner.BeginInvoke(()=>SetStatus(s)); return; } status.Text="状態: "+s; }
  void Notify(string text) { icon.ShowBalloonTip(10000,"Chrome Remote HDR",text,ToolTipIcon.Warning); }
- void Quit() { if(File.Exists(statePath)) { MessageBox.Show("復元待ちのHDR設定があります。終了後は自動復元されません。必要に応じて再起動して復元してください。","Chrome Remote HDR",MessageBoxButtons.OK,MessageBoxIcon.Warning); } Diagnostics.CleanExit(); watcher?.Dispose(); icon.Visible=false; icon.Dispose(); ExitThread(); }
+ void Quit() { if(File.Exists(statePath)) { MessageBox.Show("復元待ちのHDR設定があります。終了後は自動復元されません。必要に応じて再起動して復元してください。","Chrome Remote HDR",MessageBoxButtons.OK,MessageBoxIcon.Warning); } lock (gate) { quitting = true; TryThemeChange(remoteTheme.Restore); } Diagnostics.CleanExit(); watcher?.Dispose(); icon.Visible=false; icon.Dispose(); ExitThread(); }
 }
-
-
-
