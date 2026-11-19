@@ -14,3 +14,15 @@ icon-*.png
 
 observer/
 test-observer/
+
+# Windows diagnostics, local preferences, and recovery state
+*.log
+*.log.old
+running.json
+observer-running.json
+logging.json
+restore.json
+restore.json.tmp
+app-theme-restore.json
+app-theme-restore.json.tmp
+remote-light-theme.enabled

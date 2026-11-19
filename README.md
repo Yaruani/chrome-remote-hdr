@@ -1,16 +1,38 @@
 # Chrome Remote HDR
 
-Chrome Remote Desktopの接続イベントを監視するWindows 11 24H2以降向け常駐アプリです。
+Chrome Remote Desktopの接続に合わせてHDRを切り替えるWindows常駐アプリです。
 
-- 接続時: HDRが有効なディスプレイを記録してHDRをオフにします。
-- 切断時: 記録したディスプレイのHDRをオンに戻します。
-- 通知領域のアイコンを右クリックすると、状態確認、自動起動の切り替え、復元の再試行、終了ができます。
-- ログイン時の自動起動は現在のWindowsユーザーに登録済みです。解除はアイコンのメニューで行えます。
-- 復元待ちの情報は %LOCALAPPDATA%\ChromeRemoteHDR\restore.json に保存されます。復元に失敗した場合はディスプレイの接続を確認してからメニューで再試行してください。
-- アプリ起動前に開始された接続は検出しません。接続前にアプリを起動してください。
-- EXEはappフォルダー内の他のファイルと一緒に使用してください。フォルダーを移動すると自動起動の登録先が無効になるため、移動前にメニューで自動起動を解除し、移動後に再登録してください。
-- .NET 8 Windows Desktop Runtimeが必要です。このPCではインストール済みです。
-- 実際のChrome Remote Desktop接続・切断による切り替えは未検証です。
+- 接続時に各ディスプレイのHDR設定を保存してHDRをオフにし、切断時に元の設定を復元します。
+- 通知領域からHDRの状態を確認し、HDRとWindowsアプリのテーマを手動で切り替えられます。
+- 必要に応じて、接続中だけWindowsのアプリモードをライトにできます。
+
+## 動作環境
+
+- Windows 11 24H2以降
+- リモート接続を受ける側のPCにセットアップしたChrome Remote Desktop
+- HDR切り替えにはHDR対応ディスプレイ
+- ビルドには [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- ビルド済みのアプリを起動するだけなら、PCのアーキテクチャに合った .NET 8 Windows Desktop Runtime
+
+## ビルド
+
+ソースをクローンするか、GitHubの「Code → Download ZIP」から取得して展開します。PowerShellでリポジトリのルートを開き、以下を実行してください。
+
+```powershell
+dotnet publish .\ChromeRemoteHDR.csproj -c Release -o .\app
+dotnet publish .\ExitObserver\ExitObserver.csproj -c Release -o .\observer
+```
+
+2行目は、独立した終了監視アプリを使う場合だけ必要です。
+
+## 起動
+
+1. リモート接続を受ける側のPCで、`app\ChromeRemoteHDR.exe` を起動します。接続を始める前に起動してください。
+2. 通知領域のアイコンを右クリックし、必要に応じて「Windowsログイン時に起動」を有効にします。
+3. 独立した終了監視を使う場合は、`observer\ExitObserver.exe` も起動します。本体を検出するには、`app` と `observer` を同じ親フォルダーに置いてください。
+
+EXEは出力先フォルダー内のDLLやJSONと一緒に使ってください。フォルダーを移動する場合は、移動前に自動起動を解除し、移動後に登録し直してください。
+
 
 ## ログと異常終了の確認
 - 通知領域のアイコンを右クリックし「動作ログを保存」で通常ログのオン・オフを切り替えます。初期値はオンです。
@@ -24,10 +46,10 @@ Chrome Remote Desktopの接続イベントを監視するWindows 11 24H2以降�
 
 ## 独立した終了監視アプリ
 - ExitObserver はHDR切り替え本体とは別プロセスで動き、5秒間隔で本体の状態を確認します。自動的なHDR切り替えや本体の再起動は行いません。
-- ログ: %LOCALAPPDATA%\ChromeRemoteHDR-observer\observer.log。Windowsログイン時に監視を開始します。
+- ログは `%LOCALAPPDATA%\ChromeRemoteHDR-observer\observer.log` に保存されます。
 - 本体検出・終了検出・終了コード・1分ごとの稼働記録を保存します。終了を検出した時刻は実際の終了時刻と最大約5秒ずれることがあります。
 - 監視アプリの正常終了を確認できなかった場合、次の起動時に記録します。電源断・ログオフ・強制終了などの区別はできません。
-- ログイン時の自動起動を解除するには、Windows設定のスタートアップアプリから ChromeRemoteHDR_ExitObserver をオフにしてください。起動中のプロセスはタスクマネージャーで ExitObserver を終了できます。
+- 監視アプリもログイン時に起動するには、Windowsのスタートアップフォルダーに `ExitObserver.exe` のショートカットを追加します。起動中のプロセスはタスクマネージャーで終了できます。
 - ログの書き込み不能や、本体と監視アプリの同時終了中は詳細を記録できません。記録済みの終了コードだけで原因が特定できない場合があります。
 
 ## 接続中のWindowsアプリモード
@@ -41,3 +63,7 @@ Chrome Remote Desktopの接続イベントを監視するWindows 11 24H2以降�
 - 右クリックメニューの「HDR」から、接続中のHDR対応画面をまとめてオン・オフできます。現在の状態は見出しとチェックマークで確認できます。
 - 「Windowsアプリのテーマ」からライト・ダークを選べます。Codexはテーマを「システム」に設定している場合に追従します。
 - リモート接続中の手動変更は、切断時に保存された接続前の設定で復元します。テーマの復元はテーマ自動切り替えが有効な接続に適用します。
+
+## ライセンス
+
+[MIT License](LICENSE)
