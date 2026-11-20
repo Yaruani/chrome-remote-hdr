@@ -15,41 +15,38 @@ sealed class HdrTrayIcons : IDisposable
         using var bitmap = new Bitmap(32, 32);
         using var canvas = Graphics.FromImage(bitmap);
         canvas.SmoothingMode = SmoothingMode.AntiAlias;
-        var (background, foreground) = state switch
+        var panelColor = state switch
         {
-            HdrState.On => (Color.Gold, Color.FromArgb(71, 35, 0)),
-            HdrState.Off => (Color.FromArgb(33, 65, 146), Color.White),
-            HdrState.Mixed => (Color.FromArgb(108, 45, 154), Color.White),
-            _ => (Color.FromArgb(82, 87, 94), Color.White)
+            HdrState.On => Color.FromArgb(94, 226, 202),
+            HdrState.Off => Color.FromArgb(255, 162, 192),
+            HdrState.Mixed => Color.FromArgb(204, 185, 255),
+            _ => Color.FromArgb(190, 200, 213)
         };
-        using var bg = new SolidBrush(background);
-        using var fg = new SolidBrush(foreground);
-        using var pen = new Pen(foreground, 2.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-        canvas.FillRectangle(bg, 0, 0, 32, 32);
-        if (state == HdrState.On)
+        using var panel = new SolidBrush(panelColor);
+        using var ink = new SolidBrush(Color.FromArgb(21, 29, 48));
+        using var stroke = new Pen(ink, 4) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+
+        // Leave just enough room for a stand, so the glyph stays large at 16 px.
+        canvas.FillRectangle(panel, 1, 2, 30, 24);
+        canvas.FillRectangle(panel, 13, 26, 6, 3);
+        canvas.FillRectangle(panel, 8, 29, 16, 2);
+
+        switch (state)
         {
-            canvas.FillEllipse(fg, 9, 9, 14, 14);
-            for (var i = 0; i < 8; i++)
-            {
-                var angle = i * MathF.PI / 4;
-                var x = MathF.Cos(angle);
-                var y = MathF.Sin(angle);
-                canvas.DrawLine(pen, 16 + 10 * x, 16 + 10 * y, 16 + 13 * x, 16 + 13 * y);
-            }
-        }
-        else if (state == HdrState.Off)
-        {
-            canvas.FillEllipse(fg, 5, 5, 22, 22);
-            canvas.FillEllipse(bg, 13, 2, 19, 19);
-        }
-        else if (state == HdrState.Mixed)
-        {
-            canvas.DrawEllipse(pen, 6, 6, 20, 20);
-            canvas.FillPie(fg, 6, 6, 20, 20, 90, 180);
-        }
-        else
-        {
-            canvas.DrawLine(pen, 8, 16, 24, 16);
+            case HdrState.On:
+                canvas.DrawEllipse(stroke, 9, 7, 14, 14);
+                break;
+            case HdrState.Off:
+                canvas.DrawLine(stroke, 10, 8, 22, 20);
+                canvas.DrawLine(stroke, 22, 8, 10, 20);
+                break;
+            case HdrState.Mixed:
+                canvas.DrawEllipse(stroke, 9, 7, 14, 14);
+                canvas.FillPie(ink, 9, 7, 14, 14, 90, 180);
+                break;
+            default:
+                canvas.DrawLine(stroke, 9, 14, 23, 14);
+                break;
         }
 
         var handle = bitmap.GetHicon();
